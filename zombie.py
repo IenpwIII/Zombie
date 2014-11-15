@@ -1,6 +1,5 @@
 import random
 import time
-import json
 
 def dirOffset(loc,direction):
 	"""takes a numpad direction and an x,y coordinate pair. returns a new coordinate pair, offset by 1 in the specified direction"""
@@ -104,21 +103,25 @@ class Map(object):
 class Unit(object):
 	"""This is the basic unit class. All units will be instances of Unit with stats drawn from external data.
 	Icon = the image displayed by the Map
+	Uclass = the unit's class
+	Name = what to call the unit. Often the same as Uclass
 	Realm = which Map the unit is on
 	Domain = land/sea/air/etc.
 	AP = number of action points allotted to the unit per turn
 	Position = where the unit is located on the map
-	Action = current action of the unit"""
-	def __init__(self, icon, realm, team, position, ap, action):
+	AI = ai controlled? 1 = yes"""
+	def __init__(self, icon, uclass, name, realm, team, position, ap, ai):
 		super(Unit, self).__init__()
 		self.icon = icon
+		self.uclass = uclass
+		self.name = name
 		self.realm = realm
 		self.team = team
 		self.position = position
 		self.maxap = ap
-		self.action = action
+		self.ai = ai
 		# add the unit to its team
-		self.team.addMember(self)
+		self.team.addMember(self,self.name)
 		# place the unit on the map
 		self.changeLoc(self.position)
 
@@ -149,62 +152,102 @@ class Unit(object):
 			return "error: bad destination"
 
 
-	# this will be updated to contain the action/pathfinding logic or something. For now it just moves the unit like a derp
+	# this ends the units turn
+	def endTurn(self):
+		self.ap = 0
+
+
+	# this adds the unit's order to the queue using a predicted ap value
 	def takeAction(self):
-		self.ap = self.maxap
-		while self.ap > 0:
-			direction = random.randint(0,9)
-			if direction != 5:
-				self.move(direction)
+		direction =- 1
+		while direction != 5:
+			if self.ai == 1:
+				direction = random.randint(0,9)
 			else:
-				#skip turn
-				self.ap = 0
+				try:
+					direction = int(raw_input("Which direction to move %s? " % self.name))
+				except ValueError:
+					direction = 5
+			if direction != 5:
+				self.team.addOrder({"unit" : self, "action" : "move", "direction" : direction})
+		self.team.addOrder({"unit" : self, "action" : "end"})
 		
 
 
 class Team(object):
-	"""These contain lists of units that belong to one side."""
+	"""These contain lists of units that belong to one side.
+	name = the name of the team
+	members = the units on the team
+	queue = the command queue for the current turn"""
 	def __init__(self, name):
 		super(Team, self).__init__()
 		self.name = name
-		self.members = []
+		self.members = {}
+		self.queue = []
 
 	# add/remove units to the list of members
-	def addMember(self, member):
-		self.members.append(member)
+	def addMember(self, unit, name):
+		self.members[name] = unit
 
 	def removeMember(self, index):
 		del(self.members[index])
 
-	# each unit takes its action when the turn is advanced
-	def takeTurn(self):
-		for i in self.members:
-			i.takeAction()
+	# add an order to the queue
+	def addOrder(self, order):
+		self.queue.append(order)
 
+	# players give units orders. then the orders are executed.
+	def takeTurn(self,ai):
+		self.queue = []
+		if ai == 0:
+			name = None
+			while name != "":
+				name = str(raw_input("Which unit to move? "))
+				try:
+					unit = self.members[name]
+					unit.ap = unit.maxap
+					unit.takeAction()
+				except KeyError:
+					if name != "":
+						print "That unit doesn't exist!"
+		else:
+			for key, value in self.members.iteritems():
+				value.ap = value.maxap
+				value.takeAction()
+
+		for order in self.queue:
+			if order["action"] == "move":
+				order["unit"].move(order["direction"])
+			elif order["action"] == "end":
+				order["unit"].endTurn()
 
 		
 # main
 if __name__ == '__main__':
 	# create terrain
-	grassTile = TerrainType("-",1,1)
+	grassTile = TerrainType(" ",1,1)
 	hillTile = TerrainType("^",1,2)
 
 	# create map
 	world = Map(11,11)
 	world.generateFlat(grassTile)
-	for i in xrange(random.randint(0,121)):
+	for i in xrange(random.randint(10,35)):
 		world.updateTile("ground",[random.randint(0,10),random.randint(0,10)],hillTile)
 
 	# create teams
 	teamone = Team("Red")
-	zoms = []
 	for i in xrange(0,4):
-		zoms.append(Unit("%s" % i,world,teamone,[i,0],1,0))
+		Unit("%d" % i,"human","%d" % i,world,teamone,[i,0],2,0)
+
+	teamtwo = Team("Blu")
+	for i in xrange(0,8):
+		Unit("Z","zombie","zombie%d" % i,world,teamtwo,[10-i,10],1,1)
 
 	while True:
 		# display world
 		print
 		world.dispMap()
 		# advance the turn
-		teamone.takeTurn()
+		teamone.takeTurn(0)
+		teamtwo.takeTurn(1)
 		time.sleep(0.2)
